@@ -1,9 +1,10 @@
 #include <stdio.h>
 #include "archive.h"
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
 	if (argc < 2) {
-		printf("Usage: %s <zipfile>\n", argv[0]);
+		printf("Usage: %s <file.{tar,zip,gzip}>\n", argv[0]);
 		return 1;
 	}
 
@@ -18,7 +19,7 @@ int main(int argc, char *argv[]) {
 	ArchiveEntry *entries = NULL;
 	int count = 0;
 
-	if (!display_entries(path, &entries, &count)) {
+	if (!display_archive_content(path, &entries, &count)) {
 		printf("Failed to read archive.\n");
 		return 1;
 	}
@@ -26,7 +27,7 @@ int main(int argc, char *argv[]) {
 	printf("Contents of %s:\n", path);
 
 	for (int i = 0; i < count; i++) {
-		printf("  %s%s\n", entries[i].path, entries[i].is_directory ? "/" : "");
+		printf("./%s%s\n", entries[i].path, entries[i].is_directory ? "/" : "");
 	}
 
 	free_archive_entries(entries, count);

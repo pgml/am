@@ -1,7 +1,4 @@
-#include <archive.h>
-#include <archive_entry.h>
 #include <stdio.h>
-#include <sys/stat.h>
 #include "file.h"
 
 int main(int argc, char *argv[])

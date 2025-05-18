@@ -1,5 +1,8 @@
+#include <archive.h>
+#include <archive_entry.h>
 #include <stdio.h>
-#include "archive.h"
+#include <sys/stat.h>
+#include "file.h"
 
 int main(int argc, char *argv[])
 {
@@ -9,27 +12,15 @@ int main(int argc, char *argv[])
 	}
 
 	const char *path = argv[1];
-	ArchiveType type = detect_archive_type(path);
 
-	if (type == ARCHIVE_TYPE_UNKNOWN) {
-		printf("Unknown or unsupported archive type.\n");
+	File file = { .path = path };
+
+	if (!file_exists(&file)) {
+		printf("File %s doesn't exists", file.path);
 		return 1;
 	}
 
-	ArchiveEntry *entries = NULL;
-	int count = 0;
+	file_view_content(&file);
 
-	if (!display_archive_content(path, &entries, &count)) {
-		printf("Failed to read archive.\n");
-		return 1;
-	}
-
-	printf("Contents of %s:\n", path);
-
-	for (int i = 0; i < count; i++) {
-		printf("./%s%s\n", entries[i].path, entries[i].is_directory ? "/" : "");
-	}
-
-	free_archive_entries(entries, count);
 	return 0;
 }

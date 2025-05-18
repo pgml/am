@@ -42,13 +42,15 @@ void file_view_content(File *f)
 	archive_read_support_filter_all(a);
 
 	if (archive_read_open_filename(a, f->path, 10240) != ARCHIVE_OK) {
-		fprintf(stderr, "Failed to open archive: %s\n", archive_error_string(a));
+		fprintf(stderr,
+		        "Failed to open archive: %s\n",
+		        archive_error_string(a));
 		archive_read_free(a);
 		return;
 	}
 
-	printf(" %10s  %-s \n", "Size", "Name");
-	printf(" %10s  %-s \n", "--------", "--------");
+	printf("%10s  %-s \n", "Size", "Name");
+	printf("%10s  %-s \n", "--------", "--------");
 
 	long total_files = 0;
 	long long total_size = 0;
@@ -57,7 +59,7 @@ void file_view_content(File *f)
 		const char *pathname = archive_entry_pathname(entry);
 		long long size = archive_entry_size(entry);
 
-		printf(" %10lld  %-s \n", size, pathname);
+		printf("%10lld  %-s \n", size, pathname);
 		// skip file data, only listing
 		archive_read_data_skip(a);
 
@@ -65,9 +67,8 @@ void file_view_content(File *f)
 		total_size += size;
 	}
 
-	printf(" %10s  %-s \n", "--------", "--------");
-	printf(" %10lld  %-ld files \n", total_size, total_files);
+	printf("%10s  %-s \n", "--------", "--------");
+	printf("%10lld  %-ld files \n", total_size, total_files);
 
-	archive_read_close(a);
 	archive_read_free(a);
 }

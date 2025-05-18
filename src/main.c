@@ -9,7 +9,6 @@ int main(int argc, char *argv[])
 	}
 
 	const char *path = argv[1];
-
 	File file = { .path = path };
 
 	if (!file_exists(&file)) {

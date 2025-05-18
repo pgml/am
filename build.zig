@@ -25,8 +25,9 @@ pub fn build(b: *std.Build) void {
 		.optimize = optimize,
 	});
 
-	exe.addObjectFile(.{ .cwd_relative = "src/miniz/miniz.o" });
-	exe.addIncludePath(.{ .cwd_relative = "src/miniz/" });
+	exe.addCSourceFile(.{ .file = b.path("src/archive_reader.c") });
+	exe.addIncludePath(.{ .cwd_relative = "src/" });
+	exe.linkSystemLibrary("zip");
 	exe.linkLibC();
 
 	// This declares intent for the executable to be installed into the

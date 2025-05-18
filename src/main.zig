@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const c = @cImport({
-	@cInclude("miniz.h");
+	@cInclude("archive_reader.h");
 });
 
 const ArchiveType = enum {
@@ -59,20 +59,28 @@ const File = struct {
 	}
 
 	fn viewZip(self: *File) !void {
-		var archive: c.mz_zip_archive = std.mem.zeroes(c.mz_zip_archive);
+		var count: c_int = 0;
+		//const path_c: [*c]const u8 = self.path.ptr;
+		const path_c = std.mem.trimRight(u8, self.path, "\\0");
+		const path_c_ptr = &path_c[0];
+		const list = c.list_zip_entries(path_c_ptr, &count);
 
-		const c_path = self.path.ptr;
-		const ok = c.mz_zip_reader_init_file(&archive, c_path, 0);
-
-		if (ok == 0) {
-			std.debug.print("Failed to open archive `{s}`\n", .{self.path});
-			return error.FailedToOpenZip;
+		if (list == null) {
+			std.debug.print("Failed to open archive\n", .{});
+			return;
 		}
 
-		defer _ = c.mz_zip_reader_end(&archive);
+		const entry_count: usize = @intCast(count);
+		std.debug.print("Contents of {s}:\n", .{self.path});
 
-		const file_count = c.mz_zip_reader_get_num_files(&archive);
-		std.debug.print("`{s}`¸ contains {} file(s):\n", .{self.name(), file_count});
+		var i: usize = 0;
+		while (i < entry_count) : (i += 1) {
+			const entry_ptr = list[i];
+			const entry_str = std.mem.span(entry_ptr);
+			std.debug.print("  {d}: {s}\n", .{i, entry_str});
+		}
+
+		c.free_zip_entries(list, count);
 	}
 };
 

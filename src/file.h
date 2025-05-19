@@ -13,7 +13,12 @@ typedef struct {
 } File;
 
 int file_exists(const File *f);
-ArchiveType file_type(const File *f);
-void file_view_content(File *f);
+
+void file_view_content(const File *f);
+
+void file_extract(const File *f,
+                  char *out_dir,
+                  int flags,
+                  int preserve_structure);
 
 #endif

@@ -187,11 +187,6 @@ void file_extract(const File *f,
 	//	return;
 	//}
 
-	if (file_type(f) == ARCHIVE_TYPE_ZIP) {
-		file_extract_zip(f, out_dir, preserve_structure);
-		return;
-	}
-
 	struct archive *a;
 	struct archive *ext;
 	struct archive_entry *entry;

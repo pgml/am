@@ -11,6 +11,7 @@
 
 int copy_data(struct archive *ar, struct archive *aw);
 int file_top_level_file_count(const File *f);
+int file_need_preserve_structure(const File *f);
 
 char *file_name(const File *f, int skip_extension)
 {
@@ -97,7 +98,6 @@ void file_view_content(const File *f)
 		long long size = archive_entry_size(entry);
 
 		printf("%10lld  %-s \n", size, pathname);
-		// skip file data, only listing
 		archive_read_data_skip(a);
 
 		total_files++;
@@ -110,83 +110,11 @@ void file_view_content(const File *f)
 	archive_read_free(a);
 }
 
-// Convert octal string to integer
-int octal_to_decimal(const char *str, size_t len)
-{
-	int value = 0;
-	for (size_t i = 0; i < len && str[i]; i++) {
-		if (str[i] >= '0' && str[i] <= '7')
-			value = value * 8 + (str[i] - '0');
-	}
-	return value;
-}
-
-//void file_extract_bz2(const File *f, char *out_dir, int preserve_structure)
-//{
-//	int bz_error;
-//	FILE *bz_file = fopen(f->path, "rb");
-//
-//	if (bz_file == NULL) {
-//		printf("Couldn't open file: %s\n", f->path);
-//		return;
-//	}
-//
-//	BZFILE *bzf = BZ2_bzReadOpen(&bz_error, bz_file, 0, 0, NULL, 0);
-//
-//	if (bz_error != BZ_OK) {
-//		printf("Error reading file: %s\n", f->path);
-//		BZ2_bzReadClose(&bz_error, bzf);
-//		fclose(bz_file);
-//		return;
-//	}
-//
-//	char buf[4096];
-//
-//	while (bz_error == BZ_OK) {
-//		int n_read = BZ2_bzRead(&bz_error, bzf, buf, sizeof(buf));
-//
-//		if (bz_error == BZ_STREAM_END) {
-//			break;
-//		}
-//
-//		if (bz_error != BZ_OK && bz_error != BZ_STREAM_END) {
-//			break;
-//		}
-//
-//		char name[100+1];
-//		memcpy(name, buf, 100);
-//		name[100] = '\0';
-//
-//		char size_str[12+1];
-//		memcpy(size_str, buf + 124, 12);
-//		size_str[12] = '\0';
-//		int filesize = octal_to_decimal(size_str, 12);
-//
-//		printf("Extracting %s (%d bytes)\n", name, filesize);
-//		//size_t n_written = fwrite(buf, 1, n_read, stdout);
-//		//if (n_written != (size_t)n_read) {
-//		//	fprintf(stderr, "E: short write\n");
-//		//	return;
-//		//}
-//	}
-//
-//	if (bz_error != BZ_STREAM_END) {
-//		fprintf(stderr, "E: bzip error after read: %d\n", bz_error);
-//	}
-//
-//	BZ2_bzReadClose(&bz_error, bzf);
-//}
-
 void file_extract(const File *f,
                   char *out_dir,
                   int flags,
                   int preserve_structure)
 {
-	//if (file_type(f) == ARCHIVE_TYPE_BZIP2) {
-	//	file_extract_bz2(f, out_dir, preserve_structure);
-	//	return;
-	//}
-
 	struct archive *a;
 	struct archive *ext;
 	struct archive_entry *entry;
@@ -209,7 +137,11 @@ void file_extract(const File *f,
 	char *filename = file_name(f, 1);
 	char out_path_buf[PATH_MAX];
 	char *base_path = strdup(out_dir);
-	const int has_top_level_entries = file_top_level_file_count(f) > 0;
+
+	int need_preserve_structure = 0;
+	if (!preserve_structure) {
+		need_preserve_structure = file_need_preserve_structure(f) > 0;
+	}
 
 	for (;;) {
 		int needcr = 0;
@@ -230,8 +162,8 @@ void file_extract(const File *f,
 		 * of the archive to prevent having a bunch of lose files scattered
 		 * across the current directory which annoys me greatly
 		 */
-		if (preserve_structure == 0 && has_top_level_entries) {
-			snprintf(out_path_buf, PATH_MAX, "%s/%s", base_path, filename);
+		if (preserve_structure == 0 && !need_preserve_structure) {
+			snprintf(base_path, PATH_MAX, "%s", filename);
 		}
 
 		/*
@@ -245,7 +177,6 @@ void file_extract(const File *f,
 
 		archive_entry_set_pathname(entry, out_path_buf);
 		r = archive_write_header(ext, entry);
-
 
 		if (r != ARCHIVE_OK) {
 			printf("%s\n", archive_error_string(a));
@@ -269,7 +200,11 @@ void file_extract(const File *f,
 	archive_write_free(ext);
 }
 
-int file_top_level_file_count(const File *f)
+/*
+ * Determines whether the archive has actually a reason to
+ * be preserved when `--preserve-structure` is true
+ */
+int file_need_preserve_structure(const File *f)
 {
 	struct archive *a;
 	struct archive_entry *entry;
@@ -286,28 +221,49 @@ int file_top_level_file_count(const File *f)
 		return 0;
 	}
 
-	int file_count = 0;
 	char *filename = file_name(f, 1);
+	int result = 0;
+	int i = 0;
+	int has_archive_named_root = 0;
 
-	while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+	/*
+	 * Iterate only twice through the archive files
+	 * if there's more than one file there's a potential need to
+	 * extract the files as they are in archive if `--preserver-structure`
+	 * is true
+	 */
+	while (archive_read_next_header(a, &entry) == ARCHIVE_OK && i < 2) {
 		const char *path = archive_entry_pathname(entry);
 		char *path_dup = strdup(path);
 		char *token = strtok(path_dup, "/");
 
-		archive_read_data_skip(a);
-		if (strcmp(token, filename) == 0) {
-			free(path_dup);
-			continue;
+		if (strcmp(token, filename) != 0) {
+			has_archive_named_root = 1;
 		}
 
-		file_count++;
 		free(path_dup);
+		archive_read_data_skip(a);
+
+		if (i == 1) {
+			result = 1;
+			break;
+		}
+
+		i++;
+	}
+
+	/*
+	 * no need to preserve the structure of the archive if there is
+	 * only one file in the archive that is named like the archive itself
+	 */
+	if (i == 1 && has_archive_named_root) {
+		result = 0;
 	}
 
 	free(filename);
 	archive_read_free(a);
 
-	return file_count;
+	return result;
 }
 
 /*

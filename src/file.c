@@ -5,6 +5,7 @@
 #include <string.h>
 #include <archive.h>
 #include <archive_entry.h>
+#include <bzlib.h>
 
 #include "file.h"
 
@@ -43,7 +44,7 @@ int file_exists(const File *f)
 	return stat(f->path, &sts) == 0;
 }
 
-ArchiveType _file_type(const File *f)
+ArchiveType file_type(const File *f)
 {
 	FILE *file = fopen(f->path, "rb");
 
@@ -61,6 +62,9 @@ ArchiveType _file_type(const File *f)
 	else if (memcmp(sig, "PK\x03\x04", 4) == 0) {
 		return ARCHIVE_TYPE_ZIP;
 	}
+	else if (memcmp(sig, "BZh", 3) == 0) {
+		return ARCHIVE_TYPE_BZIP2;
+	}
 
 	return ARCHIVE_TYPE_UNKNOWN;
 }
@@ -74,7 +78,7 @@ void file_view_content(const File *f)
 	archive_read_support_format_all(a);
 	archive_read_support_filter_all(a);
 
-	if (archive_read_open_filename(a, f->path, 10240) != ARCHIVE_OK) {
+	if (archive_read_open_filename(a, f->path, 65536) != ARCHIVE_OK) {
 		fprintf(stderr,
 		        "Failed to open archive: %s\n",
 		        archive_error_string(a));
@@ -106,11 +110,88 @@ void file_view_content(const File *f)
 	archive_read_free(a);
 }
 
+// Convert octal string to integer
+int octal_to_decimal(const char *str, size_t len)
+{
+	int value = 0;
+	for (size_t i = 0; i < len && str[i]; i++) {
+		if (str[i] >= '0' && str[i] <= '7')
+			value = value * 8 + (str[i] - '0');
+	}
+	return value;
+}
+
+//void file_extract_bz2(const File *f, char *out_dir, int preserve_structure)
+//{
+//	int bz_error;
+//	FILE *bz_file = fopen(f->path, "rb");
+//
+//	if (bz_file == NULL) {
+//		printf("Couldn't open file: %s\n", f->path);
+//		return;
+//	}
+//
+//	BZFILE *bzf = BZ2_bzReadOpen(&bz_error, bz_file, 0, 0, NULL, 0);
+//
+//	if (bz_error != BZ_OK) {
+//		printf("Error reading file: %s\n", f->path);
+//		BZ2_bzReadClose(&bz_error, bzf);
+//		fclose(bz_file);
+//		return;
+//	}
+//
+//	char buf[4096];
+//
+//	while (bz_error == BZ_OK) {
+//		int n_read = BZ2_bzRead(&bz_error, bzf, buf, sizeof(buf));
+//
+//		if (bz_error == BZ_STREAM_END) {
+//			break;
+//		}
+//
+//		if (bz_error != BZ_OK && bz_error != BZ_STREAM_END) {
+//			break;
+//		}
+//
+//		char name[100+1];
+//		memcpy(name, buf, 100);
+//		name[100] = '\0';
+//
+//		char size_str[12+1];
+//		memcpy(size_str, buf + 124, 12);
+//		size_str[12] = '\0';
+//		int filesize = octal_to_decimal(size_str, 12);
+//
+//		printf("Extracting %s (%d bytes)\n", name, filesize);
+//		//size_t n_written = fwrite(buf, 1, n_read, stdout);
+//		//if (n_written != (size_t)n_read) {
+//		//	fprintf(stderr, "E: short write\n");
+//		//	return;
+//		//}
+//	}
+//
+//	if (bz_error != BZ_STREAM_END) {
+//		fprintf(stderr, "E: bzip error after read: %d\n", bz_error);
+//	}
+//
+//	BZ2_bzReadClose(&bz_error, bzf);
+//}
+
 void file_extract(const File *f,
                   char *out_dir,
                   int flags,
                   int preserve_structure)
 {
+	//if (file_type(f) == ARCHIVE_TYPE_BZIP2) {
+	//	file_extract_bz2(f, out_dir, preserve_structure);
+	//	return;
+	//}
+
+	if (file_type(f) == ARCHIVE_TYPE_ZIP) {
+		file_extract_zip(f, out_dir, preserve_structure);
+		return;
+	}
+
 	struct archive *a;
 	struct archive *ext;
 	struct archive_entry *entry;
@@ -120,13 +201,20 @@ void file_extract(const File *f,
 	ext = archive_write_disk_new();
 	archive_write_disk_set_options(ext, flags);
 	archive_read_support_format_all(a);
+	archive_read_support_filter_all(a);
 
-	if ((r = archive_read_open_filename(a, f->path, 10240))) {
+	printf("Starting extraction...\n");
+	fflush(stdout);
+
+	if ((r = archive_read_open_filename(a, f->path, 65536))) {
 		printf("%s\n", archive_error_string(a));
 		return;
 	}
 
 	char *filename = file_name(f, 1);
+	char out_path_buf[PATH_MAX];
+	char *base_path = strdup(out_dir);
+	const int has_top_level_entries = file_top_level_file_count(f) > 0;
 
 	for (;;) {
 		int needcr = 0;
@@ -141,19 +229,14 @@ void file_extract(const File *f,
 			return;
 		}
 
-		char *base_path = strdup(out_dir);
-
 		/*
 		 * If the top level directory of the archive contains several files
 		 * then we change the directory we are extracting into to the filename
 		 * of the archive to prevent having a bunch of lose files scattered
 		 * across the current directory which annoys me greatly
 		 */
-		if (preserve_structure == 0 && file_top_level_file_count(f) > 0) {
-			char *tmp_path = malloc(strlen(base_path) + strlen(filename) + 2);
-			sprintf(tmp_path, "%s/%s", base_path, filename);
-			free(base_path);
-			base_path = tmp_path;
+		if (preserve_structure == 0 && has_top_level_entries) {
+			snprintf(out_path_buf, PATH_MAX, "%s/%s", base_path, filename);
 		}
 
 		/*
@@ -161,11 +244,13 @@ void file_extract(const File *f,
 		 * with the indidivual archive files
 		 */
 		const char *curr_path = archive_entry_pathname(entry);
-		char *out_path = malloc(strlen(base_path) + strlen(curr_path) + 2);
-		sprintf(out_path, "%s/%s", base_path, curr_path);
+		snprintf(out_path_buf, PATH_MAX, "%s/%s", base_path, curr_path);
 
-		archive_entry_set_pathname(entry, out_path);
+		printf("- extracting to: %s\n", out_path_buf);
+
+		archive_entry_set_pathname(entry, out_path_buf);
 		r = archive_write_header(ext, entry);
+
 
 		if (r != ARCHIVE_OK) {
 			printf("%s\n", archive_error_string(a));
@@ -181,11 +266,9 @@ void file_extract(const File *f,
 		if (needcr) {
 			printf("\n");
 		}
-
-		free(base_path);
-		free(out_path);
 	}
 
+	free(base_path);
 	free(filename);
 	archive_read_free(a);
 	archive_write_free(ext);
@@ -200,7 +283,7 @@ int file_top_level_file_count(const File *f)
 	archive_read_support_format_all(a);
 	archive_read_support_filter_all(a);
 
-	if (archive_read_open_filename(a, f->path, 10240) != ARCHIVE_OK) {
+	if (archive_read_open_filename(a, f->path, 65536) != ARCHIVE_OK) {
 		fprintf(stderr,
 		        "Failed to open archive: %s\n",
 		        archive_error_string(a));

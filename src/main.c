@@ -1,3 +1,4 @@
+#include <time.h>
 #include <stdio.h>
 #include <archive.h>
 #include <string.h>
@@ -24,6 +25,8 @@ int main(int argc, char *argv[])
 		file_view_content(&file);
 	}
 	else if (argc > 2) {
+		clock_t start = clock();
+
 		int	flags = ARCHIVE_EXTRACT_TIME;
 		char *path = NULL;
 		char *out_dir = "./";
@@ -48,6 +51,11 @@ int main(int argc, char *argv[])
 
 		File file = { .path = path };
 		file_extract(&file, out_dir, flags, preserve_structure);
+
+		clock_t end = clock();
+		double duration = (double)(end - start) / CLOCKS_PER_SEC;
+		printf("———————————————\n");
+		printf("Extraction completed in %.2f seconds\n", duration);
 	}
 
 	return 0;

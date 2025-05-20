@@ -21,25 +21,11 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	static struct option long_opts[] = {
-		{"version", no_argument, 0, 'v'},
-		{0, 0, 0, 0}
-	};
-
-	int opt;
-	while ((opt = getopt_long(argc, argv, "hv", long_opts, NULL)) != -1) {
-		switch (opt) {
-			case 'v': print_version(); break;
-			default:
-				fprintf(stderr, "Try '%s --help' for more info.\n", argv[0]);
-				return 1;
-		}
-	}
-
 	if (argc == 2) {
 		if (strcmp(argv[1], "-v") == 0 ||
 			strcmp(argv[1], "--version") == 0)
 		{
+			print_version();
 			return 0;
 		}
 
@@ -59,6 +45,7 @@ int main(int argc, char *argv[])
 		char *path = NULL;
 		char *out_dir = "./";
 		int preserve_structure = 0;
+		int opt;
 
 		while ((opt = getopt(argc, argv, "x:o:pv")) != -1) {
 			switch (opt) {
@@ -69,6 +56,19 @@ int main(int argc, char *argv[])
 			}
 		}
 
+		static struct option long_opts[] = {
+			{"version", no_argument, 0, 'v'},
+			{0, 0, 0, 0}
+		};
+
+		while ((opt = getopt_long(argc, argv, "hv", long_opts, NULL)) != -1) {
+			switch (opt) {
+				case 'v': print_version(); break;
+				default:
+					fprintf(stderr, "Try '%s --help' for more info.\n", argv[0]);
+					return 1;
+			}
+		}
 
 		// optind is for the extra arguments
 		// which are not parsed

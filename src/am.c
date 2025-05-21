@@ -8,6 +8,7 @@
 
 #include "am.h"
 #include "file.h"
+#include "browser.h"
 
 void print_version()
 {
@@ -47,8 +48,9 @@ int main(int argc, char *argv[])
 		int preserve_structure = 0;
 		int opt;
 
-		while ((opt = getopt(argc, argv, "x:o:pv")) != -1) {
+		while ((opt = getopt(argc, argv, "b:x:o:pv")) != -1) {
 			switch (opt) {
+				case 'b': browser_init(); return 0; break;
 				case 'x': path = optarg; break;
 				case 'o': out_dir = optarg; break;
 				case 'p': preserve_structure = 1; break;

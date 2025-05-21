@@ -5,7 +5,7 @@ $(error "Missing dependency: libarchive-dev")
 endif
 
 CFLAGS := -Wall -Wextra -O2
-LDFLAGS := $(shell pkg-config --libs libarchive)
+LDFLAGS := $(shell pkg-config --libs libarchive) -lncurses
 
 CC := cc
 SRC := $(wildcard src/*.c)

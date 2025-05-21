@@ -1,5 +1,6 @@
 #include <libgen.h>
 #include <linux/limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <archive.h>
@@ -68,42 +69,18 @@ ArchiveType file_type(const File *f)
 
 void file_view_content(const File *f)
 {
-	struct archive *a;
-	struct archive_entry *entry;
-
-	a = archive_read_new();
-	archive_read_support_format_all(a);
-	archive_read_support_filter_all(a);
-
-	if (archive_read_open_filename(a, f->path, 65536) != ARCHIVE_OK) {
-		fprintf(stderr,
-		        "Failed to open archive: %s\n",
-		        archive_error_string(a));
-		archive_read_free(a);
-		return;
-	}
-
 	printf("%10s  %-s \n", "Size", "Name");
 	printf("%10s  %-s \n", "--------", "--------");
 
-	long total_files = 0;
-	long long total_size = 0;
+	FileEntryList entry_list = file_get_entries(f, 1);
 
-	while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
-		const char *pathname = archive_entry_pathname(entry);
-		long long size = archive_entry_size(entry);
-
-		printf("%10lld  %-s \n", size, pathname);
-		archive_read_data_skip(a);
-
-		total_files++;
-		total_size += size;
-	}
+	//for (int i = 0; i < entry_list.file_count; i++) {
+	//	const char *pathname = entry_list.file_entries[i].path;
+	//	const size_t size = entry_list.file_entries[i].size;
+	//}
 
 	printf("%10s  %-s \n", "--------", "--------");
-	printf("%10lld  %-ld files \n", total_size, total_files);
-
-	archive_read_free(a);
+	printf("%10zu  %-lld files \n", entry_list.total_size, entry_list.file_count);
 }
 
 void file_extract(const File *f,
@@ -194,6 +171,67 @@ void file_extract(const File *f,
 	free(filename);
 	archive_read_free(a);
 	archive_write_free(ext);
+}
+
+FileEntryList file_get_entries(const File *f, int print_progress)
+{
+	struct archive *a;
+	struct archive_entry *entry;
+
+	a = archive_read_new();
+	archive_read_support_format_all(a);
+	archive_read_support_filter_all(a);
+
+	if (archive_read_open_filename(a, f->path, 65536) != ARCHIVE_OK) {
+		fprintf(stderr,
+		        "Failed to open archive: %s\n",
+		        archive_error_string(a));
+		archive_read_free(a);
+		exit(0);
+	}
+
+	long total_files = 0;
+	long long total_size = 0;
+	size_t list_len = 1;
+
+	FileEntry *file_entries = malloc(list_len * sizeof(FileEntry));
+	if (!file_entries) {
+		printf("Nope");
+		exit(0);
+	}
+
+	while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+		const char *pathname = archive_entry_pathname(entry);
+		size_t size = archive_entry_size(entry);
+
+		char *path_dup = strdup(pathname);
+		file_entries[total_files].path = path_dup;
+		file_entries[total_files].name = basename(path_dup);
+		file_entries[total_files].size = size;
+
+		list_len++;
+		FileEntry *tmp = realloc(file_entries, list_len * sizeof(FileEntry));
+		file_entries = tmp;
+
+		if (print_progress == 1) {
+			printf("%10zu  %-s \n", size, pathname);
+		}
+
+		archive_read_data_skip(a);
+
+		total_files++;
+		total_size += size;
+	}
+
+	archive_read_free(a);
+
+	FileEntryList list = {
+		.file_entries = file_entries,
+		.file_count = total_files,
+		.total_size = total_size
+	};
+
+	return list;
 }
 
 int file_need_preserve_structure(const File *f)
@@ -304,9 +342,10 @@ static char *trim_ext(char *filename)
 	strncpy(name, filename, len);
 	name[len] = '\0';
 
-	/* check for tar archives
-	 * this can probably be done better
-	 * but it works for now */
+	/*
+	 * check for tar archives
+	 * this can probably be done better but it works for now
+	 */
 	const char *tar = strrchr(name, '.');
 	char tar_str[] = ".tar";
 

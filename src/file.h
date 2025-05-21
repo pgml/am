@@ -1,6 +1,8 @@
 #ifndef FILE_H
 #define FILE_H
 
+#include <stddef.h>
+
 typedef enum {
 	ARCHIVE_TYPE_UNKNOWN,
 	ARCHIVE_TYPE_ZIP,
@@ -10,8 +12,25 @@ typedef enum {
 } ArchiveType;
 
 typedef struct {
-	const char* path;
+	const char *path;
 } File;
+
+typedef struct {
+	const char *name;
+	const char *path;
+	size_t size;
+} FileEntry;
+
+typedef struct {
+	const char *path;
+	FileEntry *files;
+} FileDir;
+
+typedef struct {
+	FileEntry *file_entries;
+	long long file_count;
+	size_t total_size;
+} FileEntryList;
 
 int file_exists(const File *f);
 
@@ -21,6 +40,8 @@ void file_extract(const File *f,
                   char *out_dir,
                   int flags,
                   int preserve_structure);
+
+FileEntryList file_get_entries(const File *f, int print_progress);
 
 int file_top_level_file_count(const File *f);
 

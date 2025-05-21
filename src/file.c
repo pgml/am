@@ -132,7 +132,10 @@ void file_extract(const File *f,
 
 	char *filename = file_name(f, 1);
 	char out_path_buf[PATH_MAX];
-	char *base_path = strdup(out_dir);
+	char *base_path = malloc(PATH_MAX);
+
+	strncpy(base_path, out_dir, PATH_MAX);
+	base_path[PATH_MAX-1] = '\0';
 
 	int need_preserve_structure = 0;
 	if (!preserve_structure) {
@@ -218,7 +221,6 @@ int file_need_preserve_structure(const File *f)
 	int i = 0;
 	int has_archive_named_root = 0;
 
-	printf("%s\n", filename);
 	/*
 	 * Iterate only twice through the archive files
 	 * if there's more than one file there's a potential need to

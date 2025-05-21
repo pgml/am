@@ -9,6 +9,12 @@ typedef enum {
 	ARCHIVE_TYPE_TAR
 } ArchiveType;
 
+typedef enum {
+	EXTRACT_OK,
+	EXTRACT_FAIL,
+	EXTRACT_CANCEL
+} ExtractStatus;
+
 typedef struct {
 	const char* path;
 } File;
@@ -17,10 +23,11 @@ int file_exists(const File *f);
 
 void file_view_content(const File *f);
 
-void file_extract(const File *f,
-                  char *out_dir,
-                  int flags,
-                  int preserve_structure);
+ExtractStatus file_extract(const File *f,
+                           char *out_dir,
+                           int flags,
+                           bool preserve_structure,
+                           bool force_extract);
 
 int file_top_level_file_count(const File *f);
 
@@ -28,6 +35,6 @@ int file_top_level_file_count(const File *f);
  * Determines whether the archive has actually a reason to
  * be preserved when `--preserve-structure` is true
  */
-int file_need_preserve_structure(const File *f);
+bool file_need_preserve_structure(const File *f);
 
 #endif

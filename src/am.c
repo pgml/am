@@ -1,10 +1,10 @@
-#include <time.h>
-#include <stdio.h>
 #include <archive.h>
-#include <string.h>
-#include <libgen.h>
-#include <unistd.h>
 #include <getopt.h>
+#include <libgen.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
 
 #include "am.h"
 #include "file.h"
@@ -76,10 +76,14 @@ int main(int argc, char *argv[])
 		//	printf("extra arguments: %s\n", argv[optind]);
 		//}
 
-		printf("path: %s\n out: %s\n preserve: %d\n", path, out_dir, preserve_structure);
+		printf("path: %s\n out: %s\n preserve: %d\n",
+		       path,
+		       out_dir,
+		       preserve_structure);
 
 		File file = { .path = path };
-		file_extract(&file, out_dir, flags, preserve_structure);
+
+		file_extract(&file, out_dir, flags, preserve_structure, false);
 
 		clock_t end = clock();
 		double duration = (double)(end - start) / CLOCKS_PER_SEC;

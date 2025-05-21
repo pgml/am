@@ -87,7 +87,7 @@ void file_view_content(const File *f)
 	printf("%10s  %-s \n", "--------", "--------");
 
 	long total_files = 0;
-	long long total_size = 0;
+	size_t total_size = 0;
 
 	while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
 		const char *pathname = archive_entry_pathname(entry);
@@ -101,7 +101,7 @@ void file_view_content(const File *f)
 	}
 
 	printf("%10s  %-s \n", "--------", "--------");
-	printf("%10lld  %-ld files \n", total_size, total_files);
+	printf("%10zu  %-ld files \n", total_size, total_files);
 
 	archive_read_free(a);
 }
@@ -306,16 +306,20 @@ static char *trim_ext(char *filename)
 	strncpy(name, filename, len);
 	name[len] = '\0';
 
-	/* check for tar archives
-	 * this can probably be done better
-	 * but it works for now */
+	/*
+	 * check for tar archives this can probably be done better
+	 * but it works for now
+	 */
 	const char *tar = strrchr(name, '.');
 	char tar_str[] = ".tar";
 
 	if (tar != NULL && strcmp(tar_str, tar) == 0) {
 		int len = strlen(name) - strlen(tar);
 		char *tmp = malloc(len + 1);
+
 		strncpy(tmp, name, len);
+		tmp[len] = '\0';
+
 		free(name);
 		name = tmp;
 	}

@@ -1,40 +1,36 @@
 #include <libgen.h>
 #include <linux/limits.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <archive.h>
 #include <archive_entry.h>
-#include <bzlib.h>
 
 #include "file.h"
 
-int copy_data(struct archive *ar, struct archive *aw);
-int file_top_level_file_count(const File *f);
-int file_need_preserve_structure(const File *f);
+/*
+ * Copies the actual file content into the empty shell of a file
+ * created by `archive_write_header()`
+ */
+static int copy_data(struct archive *ar, struct archive *aw);
 
-char *file_name(const File *f, int skip_extension)
+/*
+ * Removes the file extension from a file string
+ */
+static char *trim_ext(char *filename);
+
+char *file_name(const File *f, int trim_extension)
 {
 	char *path_dup = strdup(f->path);
 	char *base = basename(path_dup);
+	char *name = NULL;
 
-	if (skip_extension) {
-		char *dot = strchr(base, '.');
-		size_t len = dot ? (size_t)(dot - base) : strlen(base);
-		char *name = malloc(len + 1);
-
-		if (!name) {
-			return NULL;
-		}
-
-		strncpy(name, base, len);
-		name[len] = '\0';
-		free(path_dup);
-
-		return name;
+	if (trim_extension) {
+		name = trim_ext(base);
+	}
+	else {
+		name = strdup(base);
 	}
 
-	char *name = strdup(base);
 	free(path_dup);
 	return name;
 }
@@ -173,7 +169,7 @@ void file_extract(const File *f,
 		const char *curr_path = archive_entry_pathname(entry);
 		snprintf(out_path_buf, PATH_MAX, "%s/%s", base_path, curr_path);
 
-		printf("- extracting to: %s\n", out_path_buf);
+		printf(" extracting to: %s\n", out_path_buf);
 
 		archive_entry_set_pathname(entry, out_path_buf);
 		r = archive_write_header(ext, entry);
@@ -200,10 +196,6 @@ void file_extract(const File *f,
 	archive_write_free(ext);
 }
 
-/*
- * Determines whether the archive has actually a reason to
- * be preserved when `--preserve-structure` is true
- */
 int file_need_preserve_structure(const File *f)
 {
 	struct archive *a;
@@ -226,6 +218,7 @@ int file_need_preserve_structure(const File *f)
 	int i = 0;
 	int has_archive_named_root = 0;
 
+	printf("%s\n", filename);
 	/*
 	 * Iterate only twice through the archive files
 	 * if there's more than one file there's a potential need to
@@ -266,11 +259,7 @@ int file_need_preserve_structure(const File *f)
 	return result;
 }
 
-/*
- * Copies the actual file content into the empty shell of a file
- * created by `archive_write_header()`
- */
-int copy_data(struct archive *ar, struct archive *aw)
+static int copy_data(struct archive *ar, struct archive *aw)
 {
 	int r;
 	const void *buff;
@@ -296,4 +285,38 @@ int copy_data(struct archive *ar, struct archive *aw)
 			return (r);
 		}
 	}
+}
+
+static char *trim_ext(char *filename)
+{
+	char *ext = strrchr(filename, '.');
+	if (!ext || ext == filename) {
+		return strdup(filename);
+	}
+
+	size_t len = ext - filename;
+	char *name = malloc(len + 1);
+
+	if (!name) {
+		return NULL;
+	}
+
+	strncpy(name, filename, len);
+	name[len] = '\0';
+
+	/* check for tar archives
+	 * this can probably be done better
+	 * but it works for now */
+	const char *tar = strrchr(name, '.');
+	char tar_str[] = ".tar";
+
+	if (tar != NULL && strcmp(tar_str, tar) == 0) {
+		int len = strlen(name) - strlen(tar);
+		char *tmp = malloc(len + 1);
+		strncpy(tmp, name, len);
+		free(name);
+		name = tmp;
+	}
+
+	return name;
 }

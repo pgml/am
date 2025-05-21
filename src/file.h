@@ -22,4 +22,12 @@ void file_extract(const File *f,
                   int flags,
                   int preserve_structure);
 
+int file_top_level_file_count(const File *f);
+
+/*
+ * Determines whether the archive has actually a reason to
+ * be preserved when `--preserve-structure` is true
+ */
+int file_need_preserve_structure(const File *f);
+
 #endif

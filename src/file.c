@@ -112,19 +112,19 @@ void file_view_content(const File *f)
 
 static struct FileExtract *file_extract_new(const File *f)
 {
-	struct FileExtract *fp;
+	struct FileExtract *fe;
 
-	fp = calloc(1, sizeof(*fp));
+	fe = calloc(1, sizeof(*fe));
 
-	if (fp == NULL) {
+	if (fe == NULL) {
 		return NULL;
 	}
 
-	fp->out_path_buf = calloc(1, PATH_MAX);
-	fp->base_path = calloc(1, PATH_MAX);
-	fp->need_preserve_structure = file_need_preserve_structure(f) > 0;
+	fe->out_path_buf = calloc(1, PATH_MAX);
+	fe->base_path = calloc(1, PATH_MAX);
+	fe->need_preserve_structure = file_need_preserve_structure(f) > 0;
 
-	return fp;
+	return fe;
 }
 
 static void file_extract_paths_free(struct archive *a,
@@ -222,7 +222,7 @@ ExtractStatus file_extract(const File *f,
 
 		/*
 		 * Merge `out_dir` and a potential new archive-named parent
-		 * directory with the indidivual archive files
+		 * directory with the individual archive files
 		 */
 		const char *curr_path = archive_entry_pathname(entry);
 		snprintf(fe->out_path_buf, PATH_MAX, "%s%s", fe->base_path, curr_path);
@@ -291,7 +291,7 @@ int file_need_preserve_structure(const File *f)
 	/*
 	 * Iterate only twice through the archive files
 	 * if there's more than one file there's a potential need to
-	 * extract the files as they are in archive if `--preserver-structure`
+	 * extract the files as they are in archive if `--preserve-structure`
 	 * is true
 	 */
 	while (archive_read_next_header(a, &entry) == ARCHIVE_OK && i < 2) {

@@ -9,20 +9,20 @@
 #include "am.h"
 #include "file.h"
 
-static void print_usage(int argc, char *argv[]);
+static void print_usage(char *argv[]);
 static void print_version();
+
+int VERBOSE = 0;
 
 int main(int argc, char *argv[])
 {
 	if (argc < 2) {
-		print_usage(argc, argv);
+		print_usage(argv);
 		return 1;
 	}
 
 	if (argc == 2) {
-		if (strcmp(argv[1], "-v") == 0 ||
-			strcmp(argv[1], "--version") == 0)
-		{
+		if (strcmp(argv[1], "--version") == 0) {
 			print_version();
 			return 0;
 		}
@@ -50,8 +50,8 @@ int main(int argc, char *argv[])
 				case 'x': path = optarg; break;
 				case 'o': out_dir = optarg; break;
 				case 'p': preserve_structure = 1; break;
-				case 'v': print_version(); break;
-				case 'h': print_usage(argc, argv); break;
+				case 'v': VERBOSE = 1; break;
+				case 'h': print_usage(argv); break;
 			}
 		}
 
@@ -79,27 +79,38 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		printf("Archive: %s\nOutput directory: %s\nPreserve structure: %d\n",
-		       path,
-		       out_dir,
-		       preserve_structure);
-
-		printf("————————————————\n");
+		if (VERBOSE) {
+			printf("Archive: %s\nOutput directory: %s\nPreserve structure: %d\n",
+			       path,
+			       out_dir,
+			       preserve_structure);
+			printf("————————————————\n");
+		}
 
 		File file = { .path = path };
 
-		file_extract(&file, out_dir, flags, preserve_structure, false);
-
-		clock_t end = clock();
-		double duration = (double)(end - start) / CLOCKS_PER_SEC;
-		printf("———————————————\n");
-		printf("Extraction completed in %.2f seconds\n", duration);
+		if (file_extract(&file, out_dir, flags,
+		                 preserve_structure, false) == EXTRACT_OK)
+		{
+			clock_t end = clock();
+			double duration = (double)(end - start) / CLOCKS_PER_SEC;
+			if (VERBOSE) {
+				printf("———————————————\n");
+				printf("Extraction completed in %.2f seconds\n", duration);
+			}
+		}
+		else {
+			if (VERBOSE) {
+				printf("———————————————\n");
+				printf("Extraction aborted...\n");
+			}
+		}
 	}
 
 	return 0;
 }
 
-void print_usage(int argc, char *argv[])
+void print_usage(char *argv[])
 {
 	const char *help_text =
 		"\n"
@@ -119,7 +130,8 @@ void print_usage(int argc, char *argv[])
 		"  -v               Show version information\n"
 		"  -x               Extract archive to --out-dir\n"
 		"  -o <directory>   Output directory (default: ./)\n"
-		"  -p               Preserve archive structure\n";
+		"  -p               Preserve archive structure\n"
+		"  -v               More verbosity\n";
 
 	print_version();
 

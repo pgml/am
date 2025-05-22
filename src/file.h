@@ -26,8 +26,8 @@ void file_view_content(const File *f);
 ExtractStatus file_extract(const File *f,
                            char *out_dir,
                            int flags,
-                           bool preserve_structure,
-                           bool force_extract);
+                           int preserve_structure,
+                           int force_extract);
 
 int file_top_level_file_count(const File *f);
 
@@ -35,6 +35,6 @@ int file_top_level_file_count(const File *f);
  * Determines whether the archive has actually a reason to
  * be preserved when `--preserve-structure` is true
  */
-bool file_need_preserve_structure(const File *f);
+int file_need_preserve_structure(const File *f);
 
 #endif

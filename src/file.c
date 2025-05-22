@@ -3,31 +3,20 @@
 #include <dirent.h>
 #include <libgen.h>
 #include <linux/limits.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
 #include "file.h"
+#include "am.h"
 
-/*
- * Copies the actual file content into the empty shell of a file
- * created by `archive_write_header()`
- */
-static int copy_data(struct archive *ar, struct archive *aw);
+static ExtractStatus  open_archives     (const File *f, struct archive **a);
+static int            copy_data         (struct archive *ar, struct archive *aw);
 
-/*
- * If out_dir is not the current than manipulate out_dir so that
- * `./` is prepended and `/` is appended to make further stuff easier
- * and it looks nicer when printing the path
- */
-static void prepare_out_path(char *out_dir);
-
-/*
- * Removes the file extension from a file string
- */
-static char *trim_ext(char *filename);
+static void           prepare_out_path  (char *out_dir);
+static int            prompt_overwrite  (const char *path, int *force_extract);
+static char           *trim_ext         (char *filename);
 
 char *file_name(const File *f, int trim_extension)
 {
@@ -82,15 +71,7 @@ void file_view_content(const File *f)
 	struct archive *a;
 	struct archive_entry *entry;
 
-	a = archive_read_new();
-	archive_read_support_format_all(a);
-	archive_read_support_filter_all(a);
-
-	if (archive_read_open_filename(a, f->path, 65536) != ARCHIVE_OK) {
-		fprintf(stderr,
-		        "Failed to open archive: %s\n",
-		        archive_error_string(a));
-		archive_read_free(a);
+	if (open_archives(f, &a) != EXTRACT_OK) {
 		return;
 	}
 
@@ -120,27 +101,22 @@ void file_view_content(const File *f)
 ExtractStatus file_extract(const File *f,
                            char *out_dir,
                            int flags,
-                           bool preserve_structure,
-                           bool force_extract)
+                           int preserve_structure,
+                           int force_extract)
 {
-	struct archive *a;
-	struct archive *ext;
+	struct archive *a, *ext;
 	struct archive_entry *entry;
 	int r;
 
-	a = archive_read_new();
-	ext = archive_write_disk_new();
-
-	archive_write_disk_set_options(ext, flags);
-	archive_read_support_format_all(a);
-	archive_read_support_filter_all(a);
-
-	printf("Starting extraction...\n");
+	if (VERBOSE) printf("Starting extraction...\n");
 	fflush(stdout);
 
-	if ((r = archive_read_open_filename(a, f->path, 65536))) {
-		printf("%s\n", archive_error_string(a));
+	if (open_archives(f, &a) != EXTRACT_OK) {
 		return EXTRACT_FAIL;
+	}
+	else {
+		ext = archive_write_disk_new();
+		archive_write_disk_set_options(ext, flags);
 	}
 
 	prepare_out_path(out_dir);
@@ -156,14 +132,12 @@ ExtractStatus file_extract(const File *f,
 	strncpy(base_path, out_dir, PATH_MAX);
 	base_path[PATH_MAX-1] = '\0';
 
-	bool need_preserve_structure = false;
+	int need_preserve_structure = 0;
 	if (!preserve_structure) {
 		need_preserve_structure = file_need_preserve_structure(f) > 0;
 	}
 
-	char input;
 	for (;;) {
-		int needcr = 0;
 		r = archive_read_next_header(a, &entry);
 
 		if (r == ARCHIVE_EOF) {
@@ -194,49 +168,32 @@ ExtractStatus file_extract(const File *f,
 		snprintf(out_path_buf, PATH_MAX, "%s%s", base_path, curr_path);
 
 		if (!force_extract) {
-			PRE_PROMPT:
 			/*
 			 * Check if the file exists and prompt for info
 			 * about what to do next
 			 */
-			FILE *file;
-			if ((file = fopen(out_path_buf, "r"))) {
-				fclose(file);
-
-				printf("Replace %s? [y]es, [n]o, [A]ll, [N]one: ",
-				       out_path_buf);
-				input = getchar();
-
-				while (getchar() != '\n');
-
-				switch (input) {
-					case 'N': return EXTRACT_CANCEL;
-					case 'n': continue;
-					case 'A': force_extract = true; break;
-					case 'y': break;
-					default: goto PRE_PROMPT;
+			int p;
+			if ((p = prompt_overwrite(out_path_buf,
+			                          &force_extract))) {
+				switch (p) {
+				case -2: // 0 doesn't work and I don't know why...
+					free(base_path); free(filename);
+					return EXTRACT_CANCEL;
+				case -1: continue;
 				}
 			}
 		}
 
-		printf("   extracting to: %s\n", out_path_buf);
+		printf(" extracting to: %s\n", out_path_buf);
 
 		archive_entry_set_pathname(entry, out_path_buf);
 		r = archive_write_header(ext, entry);
 
 		if (r != ARCHIVE_OK) {
 			printf("%s\n", archive_error_string(a));
-			needcr = 1;
 		}
 		else {
 			r = copy_data(a, ext);
-			if (r != ARCHIVE_OK) {
-				needcr = 1;
-			}
-		}
-
-		if (needcr) {
-			printf("\n");
 		}
 	}
 
@@ -248,25 +205,17 @@ ExtractStatus file_extract(const File *f,
 	return EXTRACT_OK;
 }
 
-bool file_need_preserve_structure(const File *f)
+int file_need_preserve_structure(const File *f)
 {
 	struct archive *a;
 	struct archive_entry *entry;
 
-	a = archive_read_new();
-	archive_read_support_format_all(a);
-	archive_read_support_filter_all(a);
-
-	if (archive_read_open_filename(a, f->path, 65536) != ARCHIVE_OK) {
-		fprintf(stderr,
-		        "Failed to open archive: %s\n",
-		        archive_error_string(a));
-		archive_read_free(a);
-		return false;
+	if (open_archives(f, &a) != EXTRACT_OK) {
+		return 0;
 	}
 
-	bool result = false;
-	bool has_archive_named_root = false;
+	int result = 0;
+	int has_archive_named_root = 0;
 	char *filename = file_name(f, 1);
 	int i = 0;
 
@@ -282,14 +231,14 @@ bool file_need_preserve_structure(const File *f)
 		char *token = strtok(path_dup, "/");
 
 		if (strcmp(token, filename) != 0) {
-			has_archive_named_root = true;
+			has_archive_named_root = 1;
 		}
 
 		free(path_dup);
 		archive_read_data_skip(a);
 
 		if (i == 1) {
-			result = true;
+			result = 1;
 			break;
 		}
 
@@ -301,7 +250,7 @@ bool file_need_preserve_structure(const File *f)
 	 * only one file in the archive that is named like the archive itself
 	 */
 	if (i == 1 && has_archive_named_root) {
-		result = false;
+		result = 0;
 	}
 
 	free(filename);
@@ -310,6 +259,24 @@ bool file_need_preserve_structure(const File *f)
 	return result;
 }
 
+static ExtractStatus open_archives(const File *f, struct archive **a)
+{
+	*a = archive_read_new();
+	archive_read_support_format_all(*a);
+	archive_read_support_filter_all(*a);
+
+	if (archive_read_open_filename(*a, f->path, 65536)) {
+		printf("%s\n", archive_error_string(*a));
+		return EXTRACT_FAIL;
+	}
+
+	return EXTRACT_OK;
+}
+
+/*
+ * Copies the actual file content into the empty shell of a file
+ * created by `archive_write_header()`
+ */
 static int copy_data(struct archive *ar, struct archive *aw)
 {
 	int r;
@@ -338,6 +305,54 @@ static int copy_data(struct archive *ar, struct archive *aw)
 	}
 }
 
+
+/*
+ * If out_dir is not the current than manipulate out_dir so that
+ * `./` is prepended and `/` is appended to make further stuff easier
+ * and it looks nicer when printing the path
+ */
+static void prepare_out_path(char *out_dir)
+{
+	char cwd_lit[] = "./";
+	if (strcmp(out_dir, cwd_lit) != 0) {
+		size_t len = strlen(out_dir);
+		size_t cwd_len = strlen(cwd_lit);
+
+		memmove(out_dir + cwd_len, out_dir, len + 2);
+		memcpy(out_dir, cwd_lit, cwd_len);
+
+		out_dir[cwd_len + len] = '/';
+		out_dir[cwd_len + len + 1] = '\0';
+	}
+}
+
+static int prompt_overwrite(const char *path, int *force_extract)
+{
+	FILE *file;
+	if ((file = fopen(path, "r"))) {
+		fclose(file);
+
+		char input;
+		printf("Replace %s? [y]es, [n]o, [A]ll, [N]one: ", path);
+		input = getchar();
+
+		while (getchar() != '\n');
+
+		switch (input) {
+			case 'N': return -2;
+			case 'n': return -1;
+			case 'A': *force_extract = 1; return 1;
+			case 'y': return 1;
+			default: prompt_overwrite(path, force_extract);
+		}
+	}
+
+	return 1;
+}
+
+/*
+ * Removes the file extension from a file string
+ */
 static char *trim_ext(char *filename)
 {
 	char *ext = strrchr(filename, '.');
@@ -374,19 +389,4 @@ static char *trim_ext(char *filename)
 	}
 
 	return name;
-}
-
-static void prepare_out_path(char *out_dir)
-{
-	char cwd_lit[] = "./";
-	if (strcmp(out_dir, cwd_lit) != 0) {
-		size_t len = strlen(out_dir);
-		size_t cwd_len = strlen(cwd_lit);
-
-		memmove(out_dir + cwd_len, out_dir, len + 2);
-		memcpy(out_dir, cwd_lit, cwd_len);
-
-		out_dir[cwd_len + len] = '/';
-		out_dir[cwd_len + len + 1] = '\0';
-	}
 }

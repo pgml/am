@@ -11,12 +11,23 @@
 #include "file.h"
 #include "am.h"
 
-static ExtractStatus  open_archives     (const File *f, struct archive **a);
-static int            copy_data         (struct archive *ar, struct archive *aw);
+struct FileExtract
+{
+	char *filename;
+	char *out_path_buf;
+	char *base_path;
+	int need_preserve_structure;
+};
 
-static void           prepare_out_path  (char *out_dir);
-static int            prompt_overwrite  (const char *path, int *force_extract);
-static char           *trim_ext         (char *filename);
+static ExtractStatus   open_archives     (const File *f, struct archive **a);
+static int             copy_data         (struct archive *ar, struct archive *aw);
+
+static void            prepare_out_path  (char *out_dir);
+static int             prompt_overwrite  (const char  *path,
+                                          int         *force_extract,
+                                          char        **new_name);
+static char           *prompt_rename     ();
+static char           *trim_ext          (char *filename);
 
 char *file_name(const File *f, int trim_extension)
 {
@@ -72,6 +83,7 @@ void file_view_content(const File *f)
 	struct archive_entry *entry;
 
 	if (open_archives(f, &a) != EXTRACT_OK) {
+		archive_read_free(a);
 		return;
 	}
 
@@ -98,14 +110,70 @@ void file_view_content(const File *f)
 	archive_read_free(a);
 }
 
+static struct FileExtract *file_extract_new(const File *f)
+{
+	struct FileExtract *fp;
+
+	fp = calloc(1, sizeof(*fp));
+
+	if (fp == NULL) {
+		return NULL;
+	}
+
+	fp->out_path_buf = calloc(1, PATH_MAX);
+	fp->base_path = calloc(1, PATH_MAX);
+	fp->need_preserve_structure = file_need_preserve_structure(f) > 0;
+
+	return fp;
+}
+
+static void file_extract_paths_free(struct archive *a,
+                                    struct archive *ext,
+                                    struct FileExtract *fe)
+{
+	if (fe == NULL) {
+		return;
+	}
+
+	if (fe->base_path) {
+		free(fe->base_path);
+	}
+	if (fe->out_path_buf) {
+		free(fe->out_path_buf);
+		fe->out_path_buf = NULL;
+	}
+	if (fe->filename) {
+		free(fe->filename);
+	}
+
+	free(fe);
+
+	archive_read_free(a);
+	archive_write_free(ext);
+}
+
+static void rename_out_path(struct FileExtract *fe, char *new_file)
+{
+	char *out_dup = strdup(fe->out_path_buf);
+	char *dir = dirname(out_dup);
+	char *tmp_buf = calloc(1, PATH_MAX);
+
+	snprintf(tmp_buf, PATH_MAX, "%s/%s", dir, new_file);
+
+	free(fe->out_path_buf);
+	fe->out_path_buf = tmp_buf;
+	free(out_dup);
+}
+
 ExtractStatus file_extract(const File *f,
                            char *out_dir,
                            int flags,
                            int preserve_structure,
                            int force_extract)
 {
-	struct archive *a, *ext;
-	struct archive_entry *entry;
+	struct archive        *a, *ext;
+	struct archive_entry  *entry;
+	struct FileExtract    *fe;
 	int r;
 
 	if (VERBOSE) printf("Starting extraction...\n");
@@ -114,28 +182,20 @@ ExtractStatus file_extract(const File *f,
 	if (open_archives(f, &a) != EXTRACT_OK) {
 		return EXTRACT_FAIL;
 	}
-	else {
-		ext = archive_write_disk_new();
-		archive_write_disk_set_options(ext, flags);
-	}
 
+	ext = archive_write_disk_new();
+	archive_write_disk_set_options(ext, flags);
+
+	fe = file_extract_new(f);
 	prepare_out_path(out_dir);
 
 	/*
 	 * get name of the archive without extension, preallocate
 	 * the final path `out_path_buf` and move `out_dir` to `base_path`
 	 */
-	char *filename = file_name(f, 1);
-	char out_path_buf[PATH_MAX];
-	char *base_path = malloc(PATH_MAX);
-
-	strncpy(base_path, out_dir, PATH_MAX);
-	base_path[PATH_MAX-1] = '\0';
-
-	int need_preserve_structure = 0;
-	if (!preserve_structure) {
-		need_preserve_structure = file_need_preserve_structure(f) > 0;
-	}
+	fe->filename = file_name(f, 1);
+	strncpy(fe->base_path, out_dir, PATH_MAX);
+	fe->base_path[PATH_MAX-1] = '\0';
 
 	for (;;) {
 		r = archive_read_next_header(a, &entry);
@@ -156,8 +216,8 @@ ExtractStatus file_extract(const File *f,
 		 * of lose files scattered across the current directory which
 		 * annoys me greatly
 		 */
-		if (!preserve_structure  && !need_preserve_structure) {
-			snprintf(base_path, PATH_MAX, "%s/", filename);
+		if (!preserve_structure  && !fe->need_preserve_structure) {
+			snprintf(fe->base_path, PATH_MAX, "%s/", fe->filename);
 		}
 
 		/*
@@ -165,28 +225,36 @@ ExtractStatus file_extract(const File *f,
 		 * directory with the indidivual archive files
 		 */
 		const char *curr_path = archive_entry_pathname(entry);
-		snprintf(out_path_buf, PATH_MAX, "%s%s", base_path, curr_path);
+		snprintf(fe->out_path_buf, PATH_MAX, "%s%s", fe->base_path, curr_path);
 
+		char *new_name = NULL;
 		if (!force_extract) {
 			/*
 			 * Check if the file exists and prompt for info
 			 * about what to do next
 			 */
 			int p;
-			if ((p = prompt_overwrite(out_path_buf,
-			                          &force_extract))) {
+			if ((p = prompt_overwrite(fe->out_path_buf,
+			                          &force_extract,
+			                          &new_name)))
+			{
 				switch (p) {
 				case -2: // 0 doesn't work and I don't know why...
-					free(base_path); free(filename);
+					file_extract_paths_free(a, ext, fe);
 					return EXTRACT_CANCEL;
 				case -1: continue;
 				}
 			}
 		}
 
-		printf(" extracting to: %s\n", out_path_buf);
+		/* renaming a file that would otherwise be overridden */
+		if (new_name != NULL && fe->out_path_buf) {
+			rename_out_path(fe, new_name);
+		}
 
-		archive_entry_set_pathname(entry, out_path_buf);
+		printf("   extracting to: %s\n", fe->out_path_buf);
+
+		archive_entry_set_pathname(entry, fe->out_path_buf);
 		r = archive_write_header(ext, entry);
 
 		if (r != ARCHIVE_OK) {
@@ -195,13 +263,13 @@ ExtractStatus file_extract(const File *f,
 		else {
 			r = copy_data(a, ext);
 		}
+
+		if (new_name != NULL) {
+			free(new_name);
+		}
 	}
 
-	free(base_path);
-	free(filename);
-	archive_read_free(a);
-	archive_write_free(ext);
-
+	file_extract_paths_free(a, ext, fe);
 	return EXTRACT_OK;
 }
 
@@ -211,6 +279,7 @@ int file_need_preserve_structure(const File *f)
 	struct archive_entry *entry;
 
 	if (open_archives(f, &a) != EXTRACT_OK) {
+		archive_read_free(a);
 		return 0;
 	}
 
@@ -305,7 +374,6 @@ static int copy_data(struct archive *ar, struct archive *aw)
 	}
 }
 
-
 /*
  * If out_dir is not the current than manipulate out_dir so that
  * `./` is prepended and `/` is appended to make further stuff easier
@@ -326,28 +394,48 @@ static void prepare_out_path(char *out_dir)
 	}
 }
 
-static int prompt_overwrite(const char *path, int *force_extract)
+static int prompt_overwrite(const char *path,
+                            int *force_extract,
+                            char **new_name)
 {
 	FILE *file;
 	if ((file = fopen(path, "r"))) {
 		fclose(file);
 
-		char input;
-		printf("Replace %s? [y]es, [n]o, [A]ll, [N]one: ", path);
-		input = getchar();
+		printf("Replace %s? [y]es, [n]o, [A]ll, [N]one, [r]ename: ", path);
 
-		while (getchar() != '\n');
+		char buf[16];
+		if (!fgets(buf, sizeof(buf), stdin)) {
+			return -1;
+		}
 
-		switch (input) {
+		if (buf[0] != '\0' && buf[strlen(buf)-1] == '\n') {
+			buf[strlen(buf)-1] = '\0';
+		}
+
+		switch (buf[0]) {
 			case 'N': return -2;
 			case 'n': return -1;
 			case 'A': *force_extract = 1; return 1;
 			case 'y': return 1;
-			default: prompt_overwrite(path, force_extract);
+			case 'r': *new_name = prompt_rename(); return 1;
+			default:
+				if (*new_name == NULL) {
+					printf("error: invalid response: %c\n", buf[0]);
+					prompt_overwrite(path, force_extract, new_name);
+				}
 		}
 	}
 
 	return 1;
+}
+
+static char *prompt_rename()
+{
+	char *new_name = malloc(PATH_MAX);
+	printf("New name: ");
+	scanf("%s", new_name);
+	return new_name;
 }
 
 /*

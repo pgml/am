@@ -4,7 +4,7 @@ ifeq ($(PKG),no)
 $(error "Missing dependency: libarchive-dev")
 endif
 
-CFLAGS := -Wall -Wextra -O2 -std=c23
+CFLAGS := -Wall -Wextra -O2
 LDFLAGS := $(shell pkg-config --libs libarchive)
 
 CC := cc

@@ -210,8 +210,8 @@ ExtractStatus file_extract(const File *f,
 				while (getchar() != '\n');
 
 				switch (input) {
-					case 'N': return EXTRACT_CANCEL; break;
-					case 'n': continue; break;
+					case 'N': return EXTRACT_CANCEL;
+					case 'n': continue;
 					case 'A': force_extract = true; break;
 					case 'y': break;
 					default: goto PRE_PROMPT;

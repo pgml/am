@@ -219,7 +219,7 @@ ExtractStatus file_extract(const File *f,
 			}
 		}
 
-		printf(" extracting to: %s\n", out_path_buf);
+		printf("   extracting to: %s\n", out_path_buf);
 
 		archive_entry_set_pathname(entry, out_path_buf);
 		r = archive_write_header(ext, entry);

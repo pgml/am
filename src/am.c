@@ -9,15 +9,13 @@
 #include "am.h"
 #include "file.h"
 
-void print_version()
-{
-	printf("am version %s\n", AM_VERSION);
-}
+static void print_usage(int argc, char *argv[]);
+static void print_version();
 
 int main(int argc, char *argv[])
 {
 	if (argc < 2) {
-		printf("Usage: %s <file.{tar,zip,gzip}>\n", argv[0]);
+		print_usage(argc, argv);
 		return 1;
 	}
 
@@ -47,12 +45,13 @@ int main(int argc, char *argv[])
 		int preserve_structure = 0;
 		int opt;
 
-		while ((opt = getopt(argc, argv, "x:o:pv")) != -1) {
+		while ((opt = getopt(argc, argv, "x:o:pvh")) != -1) {
 			switch (opt) {
 				case 'x': path = optarg; break;
 				case 'o': out_dir = optarg; break;
 				case 'p': preserve_structure = 1; break;
 				case 'v': print_version(); break;
+				case 'h': print_usage(argc, argv); break;
 			}
 		}
 
@@ -76,10 +75,16 @@ int main(int argc, char *argv[])
 		//	printf("extra arguments: %s\n", argv[optind]);
 		//}
 
-		printf("path: %s\n out: %s\n preserve: %d\n",
+		if (!path) {
+			return 1;
+		}
+
+		printf("Archive: %s\nOutput directory: %s\nPreserve structure: %d\n",
 		       path,
 		       out_dir,
 		       preserve_structure);
+
+		printf("————————————————\n");
 
 		File file = { .path = path };
 
@@ -92,4 +97,37 @@ int main(int argc, char *argv[])
 	}
 
 	return 0;
+}
+
+void print_usage(int argc, char *argv[])
+{
+	const char *help_text =
+		"\n"
+		"Example usage:\n"
+		"  am archive.tar                    => lists the archive's content\n"
+		"  am -x archive.tar                 => extracts archive's content to the\n"
+		"                                       current working directory\n"
+		"  am -x archive.tar -o ~/Downloads  => extracts archive's content to ~/Downloads\n"
+		"  am -x archive.tar -p              => extracts archive's content to cwd\n"
+		"                                       preserving the archives original structure.\n"
+		"                                       If omitted `am` attempts to extract the files\n"
+		"                                       in an archive-named directory (if necessary)\n"
+		"                                       to avoid file vomit\n"
+		"\n"
+		"Options:\n"
+		"  -h               Show this screen\n"
+		"  -v               Show version information\n"
+		"  -x               Extract archive to --out-dir\n"
+		"  -o <directory>   Output directory (default: ./)\n"
+		"  -p               Preserve archive structure\n";
+
+	print_version();
+
+	printf("\nUsage: %s [arguments] <file> [-o <directory>] [optional-arguments]\n", argv[0]);
+	printf("%s\n", help_text);
+}
+
+void print_version()
+{
+	printf("am version %s\n", AM_VERSION);
 }

@@ -18,6 +18,13 @@
 static int copy_data(struct archive *ar, struct archive *aw);
 
 /*
+ * If out_dir is not the current than manipulate out_dir so that
+ * `./` is prepended and `/` is appended to make further stuff easier
+ * and it looks nicer when printing the path
+ */
+static void prepare_out_path(char *out_dir);
+
+/*
  * Removes the file extension from a file string
  */
 static char *trim_ext(char *filename);
@@ -136,22 +143,7 @@ ExtractStatus file_extract(const File *f,
 		return EXTRACT_FAIL;
 	}
 
-	char cwd_lit[] = "./";
-	/*
-	 * If out_dir is not the current than manipulate out_dir so that
-	 * `./` is prepended and `/` is appended to make further stuff easier
-	 * and it looks nicer when printing the path
-	 */
-	if (strcmp(out_dir, cwd_lit) != 0) {
-		size_t len = strlen(out_dir);
-		size_t cwd_len = strlen(cwd_lit);
-
-		memmove(out_dir + cwd_len, out_dir, len + 2);
-		memcpy(out_dir, cwd_lit, cwd_len);
-
-		out_dir[cwd_len + len] = '/';
-		out_dir[cwd_len + len + 1] = '\0';
-	}
+	prepare_out_path(out_dir);
 
 	/*
 	 * get name of the archive without extension, preallocate
@@ -202,6 +194,7 @@ ExtractStatus file_extract(const File *f,
 		snprintf(out_path_buf, PATH_MAX, "%s%s", base_path, curr_path);
 
 		if (!force_extract) {
+			PRE_PROMPT:
 			/*
 			 * Check if the file exists and prompt for info
 			 * about what to do next
@@ -220,6 +213,8 @@ ExtractStatus file_extract(const File *f,
 					case 'N': return EXTRACT_CANCEL; break;
 					case 'n': continue; break;
 					case 'A': force_extract = true; break;
+					case 'y': break;
+					default: goto PRE_PROMPT;
 				}
 			}
 		}
@@ -379,4 +374,19 @@ static char *trim_ext(char *filename)
 	}
 
 	return name;
+}
+
+static void prepare_out_path(char *out_dir)
+{
+	char cwd_lit[] = "./";
+	if (strcmp(out_dir, cwd_lit) != 0) {
+		size_t len = strlen(out_dir);
+		size_t cwd_len = strlen(cwd_lit);
+
+		memmove(out_dir + cwd_len, out_dir, len + 2);
+		memcpy(out_dir, cwd_lit, cwd_len);
+
+		out_dir[cwd_len + len] = '/';
+		out_dir[cwd_len + len + 1] = '\0';
+	}
 }

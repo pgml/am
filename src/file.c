@@ -2,11 +2,8 @@
 #include <archive_entry.h>
 #include <dirent.h>
 #include <libgen.h>
-#include <linux/limits.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 #include "file.h"
 #include "am.h"

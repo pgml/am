@@ -1,10 +1,6 @@
 #include <archive.h>
 #include <getopt.h>
-#include <libgen.h>
-#include <stdbool.h>
-#include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #include "am.h"
 #include "file.h"
@@ -90,7 +86,7 @@ int main(int argc, char *argv[])
 		File file = { .path = path };
 
 		if (file_extract(&file, out_dir, flags,
-		                 preserve_structure, false) == EXTRACT_OK)
+		                 preserve_structure, 0) == EXTRACT_OK)
 		{
 			clock_t end = clock();
 			double duration = (double)(end - start) / CLOCKS_PER_SEC;

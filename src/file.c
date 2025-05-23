@@ -61,7 +61,9 @@ ArchiveType file_type(const File *f)
 	}
 
 	unsigned char sig[4];
-	fread(sig, 1, 4, file);
+	if (fread(sig, 1, 4, file) != 4) {
+		printf("Couldn't read file: %s\n", f->path);
+	}
 	fclose(file);
 
 	if (memcmp(sig, "\x1F\x8B", 2) == 0) {
@@ -442,7 +444,10 @@ static char *prompt_rename()
 	char *new_name = malloc(PATH_MAX);
 
 	printf("New name: ");
-	fgets(new_name, PATH_MAX, stdin);
+
+	if (!fgets(new_name, PATH_MAX, stdin)) {
+		printf("Couldn't get input: %s\n", new_name);
+	}
 
 	size_t len = strlen(new_name);
 	if (len > 0 && new_name[len-1] == '\n') {

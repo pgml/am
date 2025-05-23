@@ -50,6 +50,12 @@ https://github.com/libarchive/libarchive?tab=readme-ov-file#supported-formats
 sudo apt install gcc make pkg-config libarchive-dev
 ```
 
+**Fedora / RHEL**
+
+```
+sudo dnf install gcc make pkgconf-pkg-config libarchive-devel
+```
+
 
 ## Manual installation
 ```

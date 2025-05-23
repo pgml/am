@@ -229,7 +229,8 @@ ExtractStatus file_extract(const File *f,
 
 		char *new_name = NULL;
 		if (!force_extract) {
-			/* Check if the file exists and prompt
+			/*
+			 * Check if the file exists and prompt
 			 * for info about what to do next
 			 */
 			int p;
@@ -240,7 +241,8 @@ PRE_PROMPT:
 			{
 				switch (p) {
 				case 2:
-					/* rename out_path and go back to check again if
+					/*
+					 * rename out_path and go back to check again if
 					 * the renamed path also already exists and so on...:w
 					 */
 					rename_out_path(fe, new_name);
@@ -445,6 +447,13 @@ static char *prompt_rename()
 	size_t len = strlen(new_name);
 	if (len > 0 && new_name[len-1] == '\n') {
 		new_name[len-1] = '\0';
+	}
+
+	if (new_name[0] == '\0') {
+		if (VERBOSE) {
+			printf("Error: name can't be empty\n");
+		}
+		return prompt_rename();
 	}
 
 	return new_name;

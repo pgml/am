@@ -234,16 +234,18 @@ ExtractStatus file_extract(const File *f,
 			 * about what to do next
 			 */
 			int p;
+PRE_PROMPT:
 			if ((p = prompt_overwrite(fe->out_path_buf,
 			                          &force_extract,
 			                          &new_name)))
 			{
 				switch (p) {
+				case -1: continue;
 				case -2: // 0 doesn't work and I don't know why...
 					file_extract_paths_free(a, ext, fe);
 					return EXTRACT_CANCEL;
-				case -1: continue;
-				}
+				case -3: goto PRE_PROMPT;
+				};
 			}
 		}
 
@@ -266,6 +268,7 @@ ExtractStatus file_extract(const File *f,
 
 		if (new_name != NULL) {
 			free(new_name);
+			new_name = NULL;
 		}
 	}
 
@@ -289,8 +292,8 @@ int file_need_preserve_structure(const File *f)
 	int i = 0;
 
 	/*
-	 * Iterate only twice through the archive files
-	 * if there's more than one file there's a potential need to
+	 * Iterate only twice through the archive files.
+	 * If there's more than one file there's a potential need to
 	 * extract the files as they are in archive if `--preserve-structure`
 	 * is true
 	 */
@@ -420,10 +423,8 @@ static int prompt_overwrite(const char *path,
 			case 'y': return 1;
 			case 'r': *new_name = prompt_rename(); return 1;
 			default:
-				if (*new_name == NULL) {
-					printf("error: invalid response: %c\n", buf[0]);
-					prompt_overwrite(path, force_extract, new_name);
-				}
+				printf("error: invalid response: %c\n", buf[0]);
+				return -3;
 		}
 	}
 
@@ -433,8 +434,15 @@ static int prompt_overwrite(const char *path,
 static char *prompt_rename()
 {
 	char *new_name = malloc(PATH_MAX);
+
 	printf("New name: ");
-	scanf("%s", new_name);
+	fgets(new_name, PATH_MAX, stdin);
+
+	size_t len = strlen(new_name);
+	if (len > 0 && new_name[len-1] == '\n') {
+		new_name[len-1] = '\0';
+	}
+
 	return new_name;
 }
 

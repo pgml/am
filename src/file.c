@@ -229,9 +229,8 @@ ExtractStatus file_extract(const File *f,
 
 		char *new_name = NULL;
 		if (!force_extract) {
-			/*
-			 * Check if the file exists and prompt for info
-			 * about what to do next
+			/* Check if the file exists and prompt
+			 * for info about what to do next
 			 */
 			int p;
 PRE_PROMPT:
@@ -240,6 +239,12 @@ PRE_PROMPT:
 			                          &new_name)))
 			{
 				switch (p) {
+				case 2:
+					/* rename out_path and go back to check again if
+					 * the renamed path also already exists and so on...:w
+					 */
+					rename_out_path(fe, new_name);
+					goto PRE_PROMPT;
 				case -1: continue;
 				case -2: // 0 doesn't work and I don't know why...
 					file_extract_paths_free(a, ext, fe);
@@ -247,11 +252,6 @@ PRE_PROMPT:
 				case -3: goto PRE_PROMPT;
 				};
 			}
-		}
-
-		/* renaming a file that would otherwise be overridden */
-		if (new_name != NULL && fe->out_path_buf) {
-			rename_out_path(fe, new_name);
 		}
 
 		printf("   extracting to: %s\n", fe->out_path_buf);
@@ -419,9 +419,13 @@ static int prompt_overwrite(const char *path,
 		switch (buf[0]) {
 			case 'N': return -2;
 			case 'n': return -1;
-			case 'A': *force_extract = 1; return 1;
+			case 'A':
+				*force_extract = 1;
+				return 1;
 			case 'y': return 1;
-			case 'r': *new_name = prompt_rename(); return 1;
+			case 'r':
+				*new_name = prompt_rename();
+				return 2;
 			default:
 				printf("error: invalid response: %c\n", buf[0]);
 				return -3;

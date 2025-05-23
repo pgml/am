@@ -248,7 +248,7 @@ PRE_PROMPT:
 					rename_out_path(fe, new_name);
 					goto PRE_PROMPT;
 				case -1: continue;
-				case -2: // 0 doesn't work and I don't know why...
+				case -2:
 					file_extract_paths_free(a, ext, fe);
 					return EXTRACT_CANCEL;
 				case -3: goto PRE_PROMPT;

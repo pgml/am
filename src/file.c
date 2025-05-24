@@ -1,23 +1,35 @@
+#include <archive.h>
+#include <archive_entry.h>
+#include <dirent.h>
 #include <libgen.h>
 #include <linux/limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <archive.h>
-#include <archive_entry.h>
+#include <sys/stat.h>
 
 #include "file.h"
+#include "am.h"
 
-/*
- * Copies the actual file content into the empty shell of a file
- * created by `archive_write_header()`
- */
-static int copy_data(struct archive *ar, struct archive *aw);
+static int is_renaming = 0;
 
-/*
- * Removes the file extension from a file string
- */
-static char *trim_ext(char *filename);
+struct FileExtractPaths
+{
+	char *filename;
+	char *out_path_buf;
+	char *base_path;
+	char *tmp_buf;
+};
+
+static ExtractStatus   open_archives     (const File *f, struct archive **a);
+static int             copy_data         (struct archive *ar, struct archive *aw);
+
+static void            prepare_out_path  (char *out_dir);
+static int             prompt_overwrite  (const char  *path,
+                                          int         *force_extract,
+                                          char        **new_name);
+static char           *prompt_rename     ();
+static char           *trim_ext          (char *filename);
 
 char *file_name(const File *f, int trim_extension)
 {
@@ -69,47 +81,90 @@ ArchiveType file_type(const File *f)
 
 void file_view_content(const File *f)
 {
-	printf("%10s  %-s \n", "Size", "Name");
-	printf("%10s  %-s \n", "--------", "--------");
-
-	FileEntryList entry_list = file_get_entries(f, 1);
-
-	//for (int i = 0; i < entry_list.file_count; i++) {
-	//	const char *pathname = entry_list.file_entries[i].path;
-	//	const size_t size = entry_list.file_entries[i].size;
-	//}
-
-	printf("%10s  %-s \n", "--------", "--------");
-	printf("%10zu  %-lld files \n", entry_list.total_size, entry_list.file_count);
-}
-
-void file_extract(const File *f,
-                  char *out_dir,
-                  int flags,
-                  int preserve_structure)
-{
 	struct archive *a;
-	struct archive *ext;
 	struct archive_entry *entry;
-	int r;
 
-	a = archive_read_new();
-	ext = archive_write_disk_new();
-	archive_write_disk_set_options(ext, flags);
-	archive_read_support_format_all(a);
-	archive_read_support_filter_all(a);
-
-	printf("Starting extraction...\n");
-	fflush(stdout);
-
-	if ((r = archive_read_open_filename(a, f->path, 65536))) {
-		printf("%s\n", archive_error_string(a));
+	if (open_archives(f, &a) != EXTRACT_OK) {
+		archive_read_free(a);
 		return;
 	}
 
+	printf("%10s  %-s \n", "Size", "Name");
+	printf("%10s  %-s \n", "--------", "--------");
+
+	long total_files = 0;
+	size_t total_size = 0;
+
+	while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+		const char *pathname = archive_entry_pathname(entry);
+		long long size = archive_entry_size(entry);
+
+		printf("%10lld  %-s \n", size, pathname);
+		archive_read_data_skip(a);
+
+		total_files++;
+		total_size += size;
+	}
+
+	printf("%10s  %-s \n", "--------", "--------");
+	printf("%10zu  %-ld files \n", total_size, total_files);
+
+	archive_read_free(a);
+}
+
+static void file_extract_free(struct archive *a,
+                              struct archive *ext,
+                              char *tmp_buf,
+                              char *base_path,
+                              char *filename,
+                              char *out_path_buf)
+{
+	if (tmp_buf != NULL) {
+		free(tmp_buf);
+	}
+	free(base_path);
+	free(out_path_buf);
+	free(filename);
+
+	archive_read_free(a);
+	archive_write_free(ext);
+}
+ // 0 doesn't work and I don't know why...
+ExtractStatus file_extract(const File *f,
+                           char *out_dir,
+                           int flags,
+                           int preserve_structure,
+                           int force_extract)
+{
+	struct archive        *a, *ext;
+	struct archive_entry  *entry;
+	int r;
+
+	if (VERBOSE) printf("Starting extraction...\n");
+	fflush(stdout);
+
+	if (open_archives(f, &a) != EXTRACT_OK) {
+		return EXTRACT_FAIL;
+	}
+
+	ext = archive_write_disk_new();
+	archive_write_disk_set_options(ext, flags);
+
+	prepare_out_path(out_dir);
+	
+
+
+	/*
+	 * get name of the archive without extension, preallocate
+	 * the final path `out_path_buf` and move `out_dir` to `base_path`
+	 */
 	char *filename = file_name(f, 1);
-	char out_path_buf[PATH_MAX];
-	char *base_path = strdup(out_dir);
+	char *out_path_buf = malloc(PATH_MAX);
+	char *base_path = malloc(PATH_MAX);
+	char *tmp_buf = malloc(PATH_MAX);
+
+	strncpy(base_path, out_dir, PATH_MAX);
+	base_path[PATH_MAX-1] = '\0';
 
 	int need_preserve_structure = 0;
 	if (!preserve_structure) {
@@ -117,7 +172,6 @@ void file_extract(const File *f,
 	}
 
 	for (;;) {
-		int needcr = 0;
 		r = archive_read_next_header(a, &entry);
 
 		if (r == ARCHIVE_EOF) {
@@ -126,112 +180,74 @@ void file_extract(const File *f,
 
 		if (r != ARCHIVE_OK) {
 			printf("%s\n", archive_error_string(a));
-			return;
+			return EXTRACT_FAIL;
 		}
 
 		/*
-		 * If the top level directory of the archive contains several files
-		 * then we change the directory we are extracting into to the filename
-		 * of the archive to prevent having a bunch of lose files scattered
-		 * across the current directory which annoys me greatly
+		 * If the top level directory of the archive contains several
+		 * files then we change the directory we are extracting into
+		 * to the filename of the archive to prevent having a bunch
+		 * of lose files scattered across the current directory which
+		 * annoys me greatly
 		 */
-		if (preserve_structure == 0 && !need_preserve_structure) {
-			snprintf(base_path, PATH_MAX, "%s", filename);
+		if (!preserve_structure  && !need_preserve_structure) {
+			snprintf(base_path, PATH_MAX, "%s/", filename);
 		}
 
 		/*
-		 * Merge `out_dir` and a potential new archive-named parent directory
-		 * with the indidivual archive files
+		 * Merge `out_dir` and a potential new archive-named parent
+		 * directory with the indidivual archive files
 		 */
 		const char *curr_path = archive_entry_pathname(entry);
-		snprintf(out_path_buf, PATH_MAX, "%s/%s", base_path, curr_path);
+		snprintf(out_path_buf, PATH_MAX, "%s%s", base_path, curr_path);
 
-		printf(" extracting to: %s\n", out_path_buf);
+		char *new_name = NULL;
+		is_renaming = 0;
+		if (!force_extract && !is_renaming) {
+			/*
+			 * Check if the file exists and prompt for info
+			 * about what to do next
+			 */
+			int p;
+			if ((p = prompt_overwrite(out_path_buf,
+			                          &force_extract,
+			                          &new_name)))
+			{
+				switch (p) {
+				case -2: // 0 doesn't work and I don't know why...
+					file_extract_free(a, ext, tmp_buf, base_path, filename, out_path_buf);
+					return EXTRACT_CANCEL;
+				case -1: continue;
+				}
+			}
+		}
+
+		if (new_name != NULL && out_path_buf) {
+			char *dir = dirname(out_path_buf);
+			snprintf(tmp_buf, PATH_MAX, "%s/%s", dir, new_name);
+			out_path_buf = tmp_buf;
+		}
+
+		printf("   extracting to: %s\n", out_path_buf);
 
 		archive_entry_set_pathname(entry, out_path_buf);
 		r = archive_write_header(ext, entry);
 
 		if (r != ARCHIVE_OK) {
 			printf("%s\n", archive_error_string(a));
-			needcr = 1;
 		}
 		else {
 			r = copy_data(a, ext);
-			if (r != ARCHIVE_OK) {
-				needcr = 1;
-			}
 		}
 
-		if (needcr) {
-			printf("\n");
+		if (new_name != NULL) {
+			free(new_name);
 		}
 	}
 
-	free(base_path);
-	free(filename);
-	archive_read_free(a);
-	archive_write_free(ext);
-}
+	file_extract_free(a, ext, tmp_buf, base_path, filename, out_path_buf);
 
-FileEntryList file_get_entries(const File *f, int print_progress)
-{
-	struct archive *a;
-	struct archive_entry *entry;
-
-	a = archive_read_new();
-	archive_read_support_format_all(a);
-	archive_read_support_filter_all(a);
-
-	if (archive_read_open_filename(a, f->path, 65536) != ARCHIVE_OK) {
-		fprintf(stderr,
-		        "Failed to open archive: %s\n",
-		        archive_error_string(a));
-		archive_read_free(a);
-		exit(0);
-	}
-
-	long total_files = 0;
-	long long total_size = 0;
-	size_t list_len = 1;
-
-	FileEntry *file_entries = malloc(list_len * sizeof(FileEntry));
-	if (!file_entries) {
-		printf("Nope");
-		exit(0);
-	}
-
-	while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
-		const char *pathname = archive_entry_pathname(entry);
-		size_t size = archive_entry_size(entry);
-
-		char *path_dup = strdup(pathname);
-		file_entries[total_files].path = path_dup;
-		file_entries[total_files].name = basename(path_dup);
-		file_entries[total_files].size = size;
-
-		list_len++;
-		FileEntry *tmp = realloc(file_entries, list_len * sizeof(FileEntry));
-		file_entries = tmp;
-
-		if (print_progress == 1) {
-			printf("%10zu  %-s \n", size, pathname);
-		}
-
-		archive_read_data_skip(a);
-
-		total_files++;
-		total_size += size;
-	}
-
-	archive_read_free(a);
-
-	FileEntryList list = {
-		.file_entries = file_entries,
-		.file_count = total_files,
-		.total_size = total_size
-	};
-
-	return list;
+	return EXTRACT_OK;
 }
 
 int file_need_preserve_structure(const File *f)
@@ -239,24 +255,16 @@ int file_need_preserve_structure(const File *f)
 	struct archive *a;
 	struct archive_entry *entry;
 
-	a = archive_read_new();
-	archive_read_support_format_all(a);
-	archive_read_support_filter_all(a);
-
-	if (archive_read_open_filename(a, f->path, 65536) != ARCHIVE_OK) {
-		fprintf(stderr,
-		        "Failed to open archive: %s\n",
-		        archive_error_string(a));
+	if (open_archives(f, &a) != EXTRACT_OK) {
 		archive_read_free(a);
 		return 0;
 	}
 
-	char *filename = file_name(f, 1);
 	int result = 0;
-	int i = 0;
 	int has_archive_named_root = 0;
+	char *filename = file_name(f, 1);
+	int i = 0;
 
-	printf("%s\n", filename);
 	/*
 	 * Iterate only twice through the archive files
 	 * if there's more than one file there's a potential need to
@@ -297,6 +305,24 @@ int file_need_preserve_structure(const File *f)
 	return result;
 }
 
+static ExtractStatus open_archives(const File *f, struct archive **a)
+{
+	*a = archive_read_new();
+	archive_read_support_format_all(*a);
+	archive_read_support_filter_all(*a);
+
+	if (archive_read_open_filename(*a, f->path, 65536)) {
+		printf("%s\n", archive_error_string(*a));
+		return EXTRACT_FAIL;
+	}
+
+	return EXTRACT_OK;
+}
+
+/*
+ * Copies the actual file content into the empty shell of a file
+ * created by `archive_write_header()`
+ */
 static int copy_data(struct archive *ar, struct archive *aw)
 {
 	int r;
@@ -325,6 +351,74 @@ static int copy_data(struct archive *ar, struct archive *aw)
 	}
 }
 
+/*
+ * If out_dir is not the current than manipulate out_dir so that
+ * `./` is prepended and `/` is appended to make further stuff easier
+ * and it looks nicer when printing the path
+ */
+static void prepare_out_path(char *out_dir)
+{
+	char cwd_lit[] = "./";
+	if (strcmp(out_dir, cwd_lit) != 0) {
+		size_t len = strlen(out_dir);
+		size_t cwd_len = strlen(cwd_lit);
+
+		memmove(out_dir + cwd_len, out_dir, len + 2);
+		memcpy(out_dir, cwd_lit, cwd_len);
+
+		out_dir[cwd_len + len] = '/';
+		out_dir[cwd_len + len + 1] = '\0';
+	}
+}
+
+static int prompt_overwrite(const char *path,
+                            int *force_extract,
+                            char **new_name)
+{
+	FILE *file;
+	if ((file = fopen(path, "r"))) {
+		fclose(file);
+
+		printf("Replace %s? [y]es, [n]o, [A]ll, [N]one, [r]ename: ", path);
+
+		char buf[16];
+		if (!fgets(buf, sizeof(buf), stdin)) {
+			return -1;
+		}
+
+		if (buf[0] != '\0' && buf[strlen(buf)-1] == '\n') {
+			buf[strlen(buf)-1] = '\0';
+		}
+
+		switch (buf[0]) {
+			case 'N': return -2;
+			case 'n': return -1;
+			case 'A': *force_extract = 1; return 1;
+			case 'y': return 1;
+			case 'r': *new_name = prompt_rename(); return 1;
+			default:
+				if (*new_name == NULL) {
+					printf("error: invalid response: %c\n", buf[0]);
+					prompt_overwrite(path, force_extract, new_name);
+				}
+		}
+	}
+
+	return 1;
+}
+
+static char *prompt_rename()
+{
+	is_renaming = 1;
+	char *new_name = malloc(PATH_MAX);
+	printf("New name: ");
+	scanf("%s", new_name);
+	return new_name;
+}
+
+/*
+ * Removes the file extension from a file string
+ */
 static char *trim_ext(char *filename)
 {
 	char *ext = strrchr(filename, '.');
@@ -343,8 +437,8 @@ static char *trim_ext(char *filename)
 	name[len] = '\0';
 
 	/*
-	 * check for tar archives
-	 * this can probably be done better but it works for now
+	 * check for tar archives this can probably be done better
+	 * but it works for now
 	 */
 	const char *tar = strrchr(name, '.');
 	char tar_str[] = ".tar";
@@ -352,7 +446,10 @@ static char *trim_ext(char *filename)
 	if (tar != NULL && strcmp(tar_str, tar) == 0) {
 		int len = strlen(name) - strlen(tar);
 		char *tmp = malloc(len + 1);
+
 		strncpy(tmp, name, len);
+		tmp[len] = '\0';
+
 		free(name);
 		name = tmp;
 	}

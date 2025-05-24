@@ -11,6 +11,12 @@ typedef enum {
 	ARCHIVE_TYPE_TAR
 } ArchiveType;
 
+typedef enum {
+	EXTRACT_OK,
+	EXTRACT_FAIL,
+	EXTRACT_CANCEL
+} ExtractStatus;
+
 typedef struct {
 	const char *path;
 } File;
@@ -36,10 +42,11 @@ int file_exists(const File *f);
 
 void file_view_content(const File *f);
 
-void file_extract(const File *f,
-                  char *out_dir,
-                  int flags,
-                  int preserve_structure);
+ExtractStatus file_extract(const File *f,
+                           char *out_dir,
+                           int flags,
+                           int preserve_structure,
+                           int force_extract);
 
 FileEntryList file_get_entries(const File *f, int print_progress);
 

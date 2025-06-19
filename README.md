@@ -60,8 +60,8 @@ sudo dnf install gcc make pkgconf-pkg-config libarchive-devel
 ## Manual installation
 ```
 git clone https://github.com/pgml/am
-cd am;
-make;
-make install;
+cd am
+make
+make install
 ```
 

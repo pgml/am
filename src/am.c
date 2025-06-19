@@ -1,5 +1,6 @@
 #include <archive.h>
 #include <getopt.h>
+#include <locale.h>
 #include <string.h>
 
 #include "am.h"
@@ -12,6 +13,9 @@ int VERBOSE = 0;
 
 int main(int argc, char *argv[])
 {
+	// inherit locale
+	setlocale(LC_ALL, "");
+
 	if (argc < 2) {
 		print_usage(argv);
 		return 1;
